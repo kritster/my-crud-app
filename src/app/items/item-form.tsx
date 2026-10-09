@@ -2,13 +2,20 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
-import { createItem, type FormState } from "../actions";
+import type { FormState } from "./actions";
+
+type Props = {
+  // Server Action ที่จะเรียกเมื่อกดบันทึก (createItem หรือ updateItem ที่ bind id แล้ว)
+  action: (prevState: FormState, formData: FormData) => Promise<FormState>;
+  // ค่าเริ่มต้นของฟอร์ม (หน้าแก้ไขส่งข้อมูลเดิมมา, หน้าเพิ่มไม่ต้องส่ง)
+  defaultValues?: { name: string; description: string };
+};
 
 // Client Component เพราะต้องใช้ useActionState เพื่อรับข้อความ error จาก Server Action
-export default function ItemForm() {
+export default function ItemForm({ action, defaultValues }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
-    createItem,
-    {}
+    action,
+    { values: defaultValues }
   );
 
   return (

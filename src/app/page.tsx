@@ -40,6 +40,9 @@ export default async function Home() {
                 <th className="px-4 py-3 font-semibold">ชื่อ</th>
                 <th className="px-4 py-3 font-semibold">รายละเอียด</th>
                 <th className="px-4 py-3 font-semibold">วันที่สร้าง</th>
+                <th className="px-4 py-3">
+                  <span className="sr-only">จัดการ</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -55,6 +58,14 @@ export default async function Home() {
                       timeStyle: "short",
                       timeZone: "Asia/Bangkok",
                     })}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Link
+                      href={`/items/${item.id}/edit`}
+                      className="rounded border border-zinc-300 px-3 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                    >
+                      แก้ไข
+                    </Link>
                   </td>
                 </tr>
               ))}
