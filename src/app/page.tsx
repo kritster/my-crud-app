@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { Item } from "@/types/item";
 
@@ -15,7 +16,15 @@ export default async function Home() {
 
   return (
     <main className="mx-auto w-full max-w-4xl p-6">
-      <h1 className="mb-6 text-2xl font-bold">รายการ Items</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-bold">รายการ Items</h1>
+        <Link
+          href="/items/new"
+          className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+        >
+          เพิ่มรายการ
+        </Link>
+      </div>
 
       {error ? (
         <p className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
