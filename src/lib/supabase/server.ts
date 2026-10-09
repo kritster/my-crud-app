@@ -19,7 +19,7 @@ export async function createClient() {
               cookieStore.set(name, value, options)
             );
           } catch {
-            // ถูกเรียกจาก Server Component ซึ่งตั้ง cookie ไม่ได้ — ข้ามได้เพราะแอปนี้ไม่มีระบบ login
+            // ถูกเรียกจาก Server Component ซึ่งตั้ง cookie ไม่ได้ — ข้ามได้เพราะ src/proxy.ts refresh session ให้แล้ว
           }
         },
       },

@@ -3,12 +3,19 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { Item } from "@/types/item";
 import DeleteButton from "./items/delete-button";
+import { signOut } from "./auth/actions";
 
 // ส่วนหัวแสดงทันที ส่วนรายการรอข้อมูลจาก Supabase อยู่ใน <Suspense>
 // (cacheComponents บังคับให้ข้อมูลที่ไม่ cache ต้องอยู่ใน Suspense)
 export default function Home() {
   return (
     <main className="mx-auto w-full max-w-4xl p-6">
+      <div className="mb-4 flex min-h-9 items-center justify-end gap-3 text-sm">
+        <Suspense fallback={null}>
+          <CurrentUser />
+        </Suspense>
+      </div>
+
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold">รายการ Items</h1>
         <Link
@@ -23,6 +30,42 @@ export default function Home() {
         <ItemList />
       </Suspense>
     </main>
+  );
+}
+
+// แสดง username ของคนที่ login อยู่ พร้อมปุ่มออกจากระบบ
+// (proxy redirect คนที่ยังไม่ login ไป /login ก่อนแล้ว จึงมาถึงตรงนี้เฉพาะคนที่ login)
+async function CurrentUser() {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getClaims();
+  const claims = data?.claims;
+  if (!claims) return null;
+
+  // เทียบเท่า SQL: SELECT username FROM profiles WHERE id = <id ของผู้ใช้> LIMIT 1;
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("username")
+    .eq("id", claims.sub)
+    .maybeSingle();
+
+  return (
+    <>
+      <span className="text-zinc-600 dark:text-zinc-400">
+        สวัสดี{" "}
+        <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+          {profile?.username ?? claims.email}
+        </span>
+      </span>
+      {/* ฟอร์มเรียก Server Action ได้ตรง ๆ ไม่ต้องเป็น Client Component */}
+      <form action={signOut}>
+        <button
+          type="submit"
+          className="rounded border border-zinc-300 px-3 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+        >
+          ออกจากระบบ
+        </button>
+      </form>
+    </>
   );
 }
 
