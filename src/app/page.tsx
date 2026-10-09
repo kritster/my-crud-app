@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { Item } from "@/types/item";
+import DeleteButton from "./items/delete-button";
 
 // Server Component: ดึงข้อมูลบน server ทุกครั้งที่มีคนเปิดหน้า
 export default async function Home() {
@@ -59,13 +60,16 @@ export default async function Home() {
                       timeZone: "Asia/Bangkok",
                     })}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link
-                      href={`/items/${item.id}/edit`}
-                      className="rounded border border-zinc-300 px-3 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                    >
-                      แก้ไข
-                    </Link>
+                  <td className="px-4 py-3">
+                    <div className="flex items-start justify-end gap-2">
+                      <Link
+                        href={`/items/${item.id}/edit`}
+                        className="rounded border border-zinc-300 px-3 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                      >
+                        แก้ไข
+                      </Link>
+                      <DeleteButton id={item.id} name={item.name} />
+                    </div>
                   </td>
                 </tr>
               ))}

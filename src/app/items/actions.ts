@@ -71,3 +71,21 @@ export async function updateItem(
   revalidatePath("/");
   redirect("/");
 }
+
+// เรียกจากปุ่มลบโดยตรง (ไม่ผ่านฟอร์ม) จึงรับแค่ id
+export async function deleteItem(id: number): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  // .eq("id", id) = WHERE id = ... ถ้าลืมจะเป็นการลบทุกแถว
+  const { data, error } = await supabase
+    .from("items")
+    .delete()
+    .eq("id", id)
+    .select("id");
+
+  if (error) return { error: `ลบไม่สำเร็จ: ${error.message}` };
+  if (data.length === 0) return { error: "ไม่พบรายการนี้ (อาจถูกลบไปแล้ว)" };
+
+  // ล้าง cache ของหน้า list ให้แถวที่ลบหายไป
+  revalidatePath("/");
+  return {};
+}
