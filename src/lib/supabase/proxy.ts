@@ -1,10 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// หน้าที่ต้อง login ก่อน: หน้า list (/) และทุกหน้าใต้ /items (เพิ่ม/แก้ไข)
-function isProtected(pathname: string) {
-  return pathname === "/" || pathname.startsWith("/items/");
-}
+// หน้าที่เข้าได้โดยไม่ต้อง login ส่วนหน้าอื่นทั้งหมดต้อง login ก่อน
+const PUBLIC_PATHS = ["/login", "/signup"];
 
 // เรียกจาก src/proxy.ts ทุก request
 // 1) refresh session ของ Supabase แล้วเขียน cookie ใหม่กลับไปทั้ง request และ response
@@ -40,7 +38,7 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
-  if (!user && isProtected(request.nextUrl.pathname)) {
+  if (!user && !PUBLIC_PATHS.includes(request.nextUrl.pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";

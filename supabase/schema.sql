@@ -66,8 +66,13 @@ create table if not exists public.profiles (
   id         uuid primary key references auth.users(id) on delete cascade,
   username   text unique check (char_length(username) between 3 and 30),
   email      text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  role       text not null default 'user' check (role in ('user', 'admin'))
 );
+
+-- กรณีตารางสร้างไว้ก่อนมีระบบ admin: เพิ่มคอลัมน์ role
+alter table public.profiles
+  add column if not exists role text not null default 'user' check (role in ('user', 'admin'));
 
 alter table public.profiles enable row level security;
 
@@ -79,13 +84,17 @@ create policy "profiles_select_own" on public.profiles for select to authenticat
 create policy "profiles_update_own" on public.profiles for update to authenticated
   using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
 
-grant select, update on public.profiles to authenticated;
-revoke all on public.profiles from anon;
+-- แก้ได้เฉพาะคอลัมน์ username เท่านั้น ห้ามแก้ role เอง (ไม่งั้นใครก็ตั้งตัวเองเป็น admin ได้)
+revoke all on public.profiles from anon, authenticated;
+grant select on public.profiles to authenticated;
+grant update (username) on public.profiles to authenticated;
 
 
 -- ---------------------------------------------------------------------
 -- 4) trigger: มีคนสมัคร → สร้างแถวใน profiles อัตโนมัติ
 --    username มาจาก options.data.username ตอนเรียก supabase.auth.signUp
+--    ถ้าสมัครด้วยอีเมล admin (krit@uru.ac.th) จะได้ role = 'admin' ทันที
+--    (เปลี่ยนอีเมล admin ต้องแก้ 2 ที่: ในฟังก์ชันนี้ และคำสั่ง update ในส่วนที่ 5)
 -- ---------------------------------------------------------------------
 create or replace function public.handle_new_user()
 returns trigger
@@ -93,8 +102,13 @@ language plpgsql
 security definer set search_path = ''
 as $$
 begin
-  insert into public.profiles (id, username, email)
-  values (new.id, new.raw_user_meta_data ->> 'username', new.email);
+  insert into public.profiles (id, username, email, role)
+  values (
+    new.id,
+    new.raw_user_meta_data ->> 'username',
+    new.email,
+    case when lower(new.email) = 'krit@uru.ac.th' then 'admin' else 'user' end
+  );
   return new;
 end;
 $$;
@@ -106,7 +120,92 @@ create trigger on_auth_user_created
 
 
 -- ---------------------------------------------------------------------
--- 5) (ไม่บังคับ) ข้อมูลที่สร้างก่อนมีระบบสมาชิกจะมี user_id = null และไม่มีใครเห็น
+-- 5) Admin: เห็นรายชื่อ user ทั้งหมด, ลบ user ได้, จัดการ items ได้ทุกแถว
+--    admin คือ krit@uru.ac.th
+--    - ยังไม่เคยสมัคร → สมัครที่ /signup แล้วเป็น admin ทันที (trigger ในส่วนที่ 4)
+--    - สมัครไว้แล้ว   → คำสั่ง update ท้ายส่วนนี้ตั้งให้
+-- ---------------------------------------------------------------------
+
+-- ให้ items เชื่อมกับ profiles ได้ เพื่อดึงชื่อเจ้าของมาพร้อมกันในคำสั่งเดียว
+-- (โค้ดเรียกแบบนี้: .select("*, owner:profiles(username, email)"))
+-- user_id เดิมชี้ไป auth.users ซึ่งดึงผ่าน API ไม่ได้ จึงเพิ่ม FK ชี้ไป profiles อีกตัว
+
+-- สร้าง profile ให้ user ที่สมัครก่อนมี trigger (ไม่งั้นเพิ่ม FK ไม่ผ่าน)
+insert into public.profiles (id, username, email)
+select id, raw_user_meta_data ->> 'username', email from auth.users
+on conflict do nothing;
+
+alter table public.items drop constraint if exists items_user_id_profiles_fkey;
+alter table public.items
+  add constraint items_user_id_profiles_fkey
+  foreign key (user_id) references public.profiles(id) on delete cascade;
+
+-- เช็กว่าคนที่เรียกเป็น admin หรือไม่ ใช้ใน policy และฟังก์ชันอื่น
+-- security definer = ทำงานด้วยสิทธิ์เจ้าของฟังก์ชัน จึงอ่าน profiles ได้โดยไม่ติด RLS
+-- (ถ้าไม่ใช้ policy ของ profiles ที่เรียกฟังก์ชันนี้จะวนเรียกตัวเองไม่จบ)
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = (select auth.uid()) and role = 'admin'
+  );
+$$;
+
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;
+
+-- admin อ่าน profiles ได้ทุกแถว (policy หลายตัวรวมกันแบบ OR กับ profiles_select_own)
+drop policy if exists "profiles_select_admin" on public.profiles;
+create policy "profiles_select_admin" on public.profiles for select to authenticated
+  using ((select public.is_admin()));
+
+-- admin เห็น/แก้/ลบ items ได้ทุกแถว (การเพิ่มยังเป็นของตัวเองตาม own_insert)
+drop policy if exists "admin_select" on public.items;
+drop policy if exists "admin_update" on public.items;
+drop policy if exists "admin_delete" on public.items;
+
+create policy "admin_select" on public.items for select to authenticated
+  using ((select public.is_admin()));
+create policy "admin_update" on public.items for update to authenticated
+  using ((select public.is_admin())) with check ((select public.is_admin()));
+create policy "admin_delete" on public.items for delete to authenticated
+  using ((select public.is_admin()));
+
+-- ลบ user (ไม่ต้องใช้ service_role key) เรียกจากแอปด้วย supabase.rpc("admin_delete_user", { target })
+-- ลบจาก auth.users แล้ว profiles และ items ของ user นั้นถูกลบตาม (on delete cascade)
+create or replace function public.admin_delete_user(target uuid)
+returns void
+language plpgsql
+security definer set search_path = ''
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'not_admin';
+  end if;
+  if target = auth.uid() then
+    raise exception 'cannot_delete_self';
+  end if;
+
+  delete from auth.users where id = target;
+  if not found then
+    raise exception 'user_not_found';
+  end if;
+end;
+$$;
+
+revoke execute on function public.admin_delete_user(uuid) from public, anon;
+grant execute on function public.admin_delete_user(uuid) to authenticated;
+
+-- ตั้ง krit@uru.ac.th เป็น admin (กรณีสมัครไว้ก่อนแล้ว ถ้ายังไม่สมัครคำสั่งนี้ไม่มีผลอะไร)
+update public.profiles set role = 'admin' where lower(email) = 'krit@uru.ac.th';
+
+
+-- ---------------------------------------------------------------------
+-- 6) (ไม่บังคับ) ข้อมูลที่สร้างก่อนมีระบบสมาชิกจะมี user_id = null และไม่มีใครเห็น
 --    เลือกเปิดใช้บรรทัดใดบรรทัดหนึ่ง (ลบ -- ข้างหน้า) แล้วรันเฉพาะบรรทัดนั้น
 -- ---------------------------------------------------------------------
 -- update public.items set user_id = 'วาง-User-UID-จาก-Authentication-Users' where user_id is null;

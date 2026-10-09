@@ -1,7 +1,8 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import type { Item } from "@/types/item";
+import { getCurrentProfile } from "@/lib/profile";
+import type { ItemWithOwner } from "@/types/item";
 import DeleteButton from "./items/delete-button";
 import { signOut } from "./auth/actions";
 
@@ -33,29 +34,27 @@ export default function Home() {
   );
 }
 
-// แสดง username ของคนที่ login อยู่ พร้อมปุ่มออกจากระบบ
+// แสดง username ของคนที่ login อยู่ เมนู admin (ถ้าเป็น admin) และปุ่มออกจากระบบ
 // (proxy redirect คนที่ยังไม่ login ไป /login ก่อนแล้ว จึงมาถึงตรงนี้เฉพาะคนที่ login)
 async function CurrentUser() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  const claims = data?.claims;
-  if (!claims) return null;
-
-  // เทียบเท่า SQL: SELECT username FROM profiles WHERE id = <id ของผู้ใช้> LIMIT 1;
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("username")
-    .eq("id", claims.sub)
-    .maybeSingle();
+  const profile = await getCurrentProfile();
 
   return (
     <>
       <span className="text-zinc-600 dark:text-zinc-400">
         สวัสดี{" "}
         <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-          {profile?.username ?? claims.email}
+          {profile?.username ?? profile?.email ?? "ผู้ใช้"}
         </span>
       </span>
+      {profile?.role === "admin" && (
+        <Link
+          href="/admin/users"
+          className="rounded border border-amber-400 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-950"
+        >
+          จัดการผู้ใช้
+        </Link>
+      )}
       {/* ฟอร์มเรียก Server Action ได้ตรง ๆ ไม่ต้องเป็น Client Component */}
       <form action={signOut}>
         <button
@@ -73,13 +72,22 @@ async function CurrentUser() {
 async function ItemList() {
   const supabase = await createClient();
 
-  // เทียบเท่า SQL: SELECT * FROM items ORDER BY created_at DESC;
-  const { data, error } = await supabase
-    .from("items")
-    .select("*")
-    .order("created_at", { ascending: false });
+  // ดึง profile (เพื่อรู้ว่าเป็น admin ไหม) กับ items พร้อมกัน ไม่ต้องรอทีละอย่าง
+  // owner:profiles(...) = join ตาราง profiles ผ่าน FK user_id แล้วตั้งชื่อว่า owner
+  // เทียบเท่า SQL: SELECT items.*, profiles.username, profiles.email
+  //               FROM items LEFT JOIN profiles ON profiles.id = items.user_id
+  //               ORDER BY created_at DESC;
+  const [profile, { data, error }] = await Promise.all([
+    getCurrentProfile(),
+    supabase
+      .from("items")
+      .select("*, owner:profiles(username, email)")
+      .order("created_at", { ascending: false }),
+  ]);
 
-  const items = (data ?? []) as Item[];
+  const items = (data ?? []) as ItemWithOwner[];
+  // admin เห็น items ของทุกคน จึงต้องมีคอลัมน์บอกเจ้าของ (user ทั่วไปเห็นแต่ของตัวเอง)
+  const showOwner = profile?.role === "admin";
 
   if (error) {
     return (
@@ -100,6 +108,7 @@ async function ItemList() {
           <tr>
             <th className="px-4 py-3 font-semibold">ชื่อ</th>
             <th className="px-4 py-3 font-semibold">รายละเอียด</th>
+            {showOwner && <th className="px-4 py-3 font-semibold">เจ้าของ</th>}
             <th className="px-4 py-3 font-semibold">วันที่สร้าง</th>
             <th className="px-4 py-3">
               <span className="sr-only">จัดการ</span>
@@ -113,6 +122,25 @@ async function ItemList() {
               <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
                 {item.description ?? "-"}
               </td>
+              {showOwner && (
+                <td className="px-4 py-3">
+                  {item.owner ? (
+                    <>
+                      <span className="font-medium">
+                        {item.owner.username ?? "-"}
+                      </span>
+                      {item.user_id === profile?.id && (
+                        <span className="ml-1 text-xs text-zinc-500">(คุณ)</span>
+                      )}
+                      <span className="block text-xs text-zinc-500">
+                        {item.owner.email}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-zinc-500">ไม่มีเจ้าของ</span>
+                  )}
+                </td>
+              )}
               <td className="whitespace-nowrap px-4 py-3 text-zinc-500">
                 {new Date(item.created_at).toLocaleString("th-TH", {
                   dateStyle: "medium",
